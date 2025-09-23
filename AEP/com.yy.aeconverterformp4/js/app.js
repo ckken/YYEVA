@@ -854,6 +854,7 @@ function _beginConveterInternal() {
         var result = JSON.parse(jsonStr)
         var movFile = result["file"]
         var evaJson = result["evaJson"]
+        var evaResult = JSON.parse(evaJson)
         movFile = changePathToPlatform(movFile)
         writeStringToTmpFile(evaJson, 'myOutput.txt');
 
@@ -875,7 +876,7 @@ function _beginConveterInternal() {
           logFile('当前写入的类型是METADATA');
         }
 
-        convertAviToMP4(movFile, outputTempPath_264, encodeLevel, MP4EnCodeType.avc, function () {
+        convertAviToMP4(movFile, outputTempPath_264, encodeLevel, MP4EnCodeType.avc, evaResult.descript.width, evaResult.descript.height, function () {
           if (YYEVA_CUR_WRITE_STYLE == YYEVA_WRITE_STYLE_METADATA) {
             // alertMessage("当前写入的类型是METADATA")
             var shFile = 'tmp_write_h264.bat'
@@ -902,7 +903,7 @@ function _beginConveterInternal() {
           }
         });
 
-        convertAviToMP4(movFile, outputTempPath_265, encodeLevel, MP4EnCodeType.hevc, function () {
+        convertAviToMP4(movFile, outputTempPath_265, encodeLevel, MP4EnCodeType.hevc, evaResult.descript.width, evaResult.descript.height, function () {
           if (YYEVA_CUR_WRITE_STYLE == YYEVA_WRITE_STYLE_METADATA) {
             // alertMessage("当前写入的类型是METADATA")
             var shFile = 'tmp_write_h265.bat'
@@ -1008,6 +1009,7 @@ function _checkAndconvertAlpha() {
         }
         var movFile = result["file"]
         var evaJson = result["evaJson"]
+        var evaResult = JSON.parse(evaJson)
         movFile = changePathToPlatform(movFile)
         writeStringToTmpFile(evaJson, 'myOutput.txt');
 
@@ -1029,7 +1031,7 @@ function _checkAndconvertAlpha() {
           logFile('当前写入的类型是METADATA');
         }
 
-        convertAviToMP4(movFile, outputTempPath_264, encodeLevel, MP4EnCodeType.avc, function () {
+        convertAviToMP4(movFile, outputTempPath_264, encodeLevel, MP4EnCodeType.avc, evaResult.descript.width, evaResult.descript.height, function () {
           if (YYEVA_CUR_WRITE_STYLE == YYEVA_WRITE_STYLE_METADATA) {
             // alertMessage("当前写入的类型是METADATA")
             var shFile = 'tmp_write_h264.bat'
@@ -1055,7 +1057,7 @@ function _checkAndconvertAlpha() {
           }
         });
 
-        convertAviToMP4(movFile, outputTempPath_265, encodeLevel, MP4EnCodeType.hevc, function () {
+        convertAviToMP4(movFile, outputTempPath_265, encodeLevel, MP4EnCodeType.hevc, evaResult.descript.width, evaResult.descript.height, function () {
           if (YYEVA_CUR_WRITE_STYLE == YYEVA_WRITE_STYLE_METADATA) {
             // alertMessage("当前写入的类型是METADATA")
             var shFile = 'tmp_write_h265.bat'
@@ -1244,25 +1246,70 @@ function addPathUpDot(path) {
   return outPath;
 }
 
-function convertAviToMP4(inputFile, outFile, level, encodeType, callback) {
-  var params
+function convertAviToMP4(inputFile, outFile, level, encodeType, originalWidth, originalHeight, callback) {
+  logFile(`convertAviToMP4: ${originalWidth * 2}, ${originalHeight}`);
+  let scaleW = originalWidth * 2;
+  let scaleH = originalHeight;
+  var checkbox = document.getElementById('lowDeviceBox');
+  var lowDevice = checkbox.checked
+  var profile = ''
+  if (lowDevice) {
+    // 原始宽高
+    const iw = originalWidth * 2;  // 原始宽度（如1500）
+    const ih = originalHeight; // 原始高度（如1624）
+
+    // Level 3.1 限制
+    const MAX_PIXELS = 9437184; // 单帧最大像素数
+    const MAX_SIDE = 1280;      // 单边最大像素（兼容硬件解码）
+
+    // 计算原始宽高比
+    const aspectRatio = iw / ih;
+
+    // 第一步：根据总像素限制计算最大允许尺寸
+    let maxByPixelsW = Math.sqrt(MAX_PIXELS * aspectRatio);
+    let maxByPixelsH = Math.sqrt(MAX_PIXELS / aspectRatio);
+
+    // 第二步：结合单边最大限制，取更严格的值
+    let maxW = Math.min(iw, MAX_SIDE, maxByPixelsW);
+    let maxH = Math.min(ih, MAX_SIDE, maxByPixelsH);
+
+    // 第三步：确保宽高比严格一致（以计算出的宽度为准反推高度）
+    scaleW = Math.floor(maxW);
+    scaleH = Math.floor(scaleW / aspectRatio);
+
+    // 修正：如果反推的高度超过最大允许高度，则以高度为准重新计算
+    if (scaleH > maxH) {
+      scaleH = Math.floor(maxH);
+      scaleW = Math.floor(scaleH * aspectRatio);
+    }
+
+    // 最终修正：确保宽高为偶数（避免编码错误）
+    scaleW = scaleW % 2 === 0 ? scaleW : scaleW - 1;
+    scaleH = scaleH % 2 === 0 ? scaleH : scaleH - 1;
+
+    profile = '-profile:v main -level 3.1'
+    logFile(`优化后的宽高: ${scaleW}, ${scaleH}`);
+  }
+
+  var params = ''
   if (encodeType == MP4EnCodeType.avc) {
-    var params = ' -c:v libx264 -x264-params "me=umh:scenecut=60:ref=4:deblock=1:bframes=3:keyint=300:keyint_min=1:qcomp=0.50:aq-mode=2:aq-strength=0.8:psy_rd=0.3"  -c:a aac -b:a 128k -crf 23.5 -preset 5 -y -vf format=yuv420p  '
+    var params = ` -c:v libx264 ${profile} -x264-params "me=umh:scenecut=60:ref=4:deblock=1:bframes=3:keyint=300:keyint_min=1:qcomp=0.50:aq-mode=2:aq-strength=0.8:psy_rd=0.3"  -c:a aac -b:a 128k -crf 23.5 -preset 5 -y -vf "scale=${scaleW}:${scaleH},format=yuv420p"  `
+    logFile(`ccm params: ${params}`);
     if (level == MP4EnCodeLevel.low) {
-      params = ' -c:v libx264 -x264-params "me=umh:scenecut=60:ref=4:deblock=1:bframes=3:keyint=300:keyint_min=1:qcomp=0.50:aq-mode=2:aq-strength=0.8:psy_rd=0.3"  -c:a aac -b:a 128k -crf 29.5 -preset 5  -y -vf format=yuv420p  '
+      params = ` -c:v libx264 ${profile} -x264-params "me=umh:scenecut=60:ref=4:deblock=1:bframes=3:keyint=300:keyint_min=1:qcomp=0.50:aq-mode=2:aq-strength=0.8:psy_rd=0.3"  -c:a aac -b:a 128k -crf 29.5 -preset 5  -y -vf "scale=${scaleW}:${scaleH},format=yuv420p"  `
     } else if (level == MP4EnCodeLevel.high) {
-      params = ' -c:v libx264 -x264-params "me=umh:scenecut=60:ref=4:deblock=1:bframes=3:keyint=300:keyint_min=1:qcomp=0.50:aq-mode=2:aq-strength=0.8:psy_rd=0.3"  -c:a aac -b:a 128k -crf 17.5 -preset 5 -y -vf format=yuv420p  '
+      params = ` -c:v libx264 ${profile} -x264-params "me=umh:scenecut=60:ref=4:deblock=1:bframes=3:keyint=300:keyint_min=1:qcomp=0.50:aq-mode=2:aq-strength=0.8:psy_rd=0.3"  -c:a aac -b:a 128k -crf 17.5 -preset 5 -y -vf "scale=${scaleW}:${scaleH},format=yuv420p"  `
     } else if (level == MP4EnCodeLevel.customer) {
-      params = ' -c:v libx264 -x264-params "me=umh:scenecut=60:ref=4:deblock=1:bframes=3:keyint=300:keyint_min=1:qcomp=0.50:aq-mode=2:aq-strength=0.8:psy_rd=0.3"  -c:a aac -b:a 128k -crf ' + customer_crf + '  -preset 5 -y -vf format=yuv420p  '
+      params = ` -c:v libx264 -x264-params "me=umh:scenecut=60:ref=4:deblock=1:bframes=3:keyint=300:keyint_min=1:qcomp=0.50:aq-mode=2:aq-strength=0.8:psy_rd=0.3"  -c:a aac -b:a 128k -crf ' + customer_crf + '  -preset 5 -y -vf "scale=${scaleW}:${scaleH},format=yuv420p"  `
     }
   } else if (encodeType == MP4EnCodeType.hevc) {
-    var params = ' -c:v libx265 -x265-params "me=umh:scenecut=60:ref=4:deblock=1:bframes=3:keyint=300:keyint_min=1:qcomp=0.50:aq-mode=2:aq-strength=0.8:psy_rd=0.3" -vtag hvc1 -c:a aac -b:a 128k  -crf 28 -preset 5  -y -vf format=yuv420p  '
+    var params = ` -c:v libx265 ${profile} -x265-params "me=umh:scenecut=60:ref=4:deblock=1:bframes=3:keyint=300:keyint_min=1:qcomp=0.50:aq-mode=2:aq-strength=0.8:psy_rd=0.3" -vtag hvc1 -c:a aac -b:a 128k  -crf 28 -preset 5  -y -vf "scale=${scaleW}:${scaleH},format=yuv420p"  `
     if (level == MP4EnCodeLevel.low) {
-      params = ' -c:v libx265 -x265-params "me=umh:scenecut=60:ref=4:deblock=1:bframes=3:keyint=300:keyint_min=1:qcomp=0.50:aq-mode=2:aq-strength=0.8:psy_rd=0.3" -vtag hvc1 -c:a aac -b:a 128k  -crf 34 -preset 5  -y -vf format=yuv420p  '
+      params = ` -c:v libx265 ${profile} -x265-params "me=umh:scenecut=60:ref=4:deblock=1:bframes=3:keyint=300:keyint_min=1:qcomp=0.50:aq-mode=2:aq-strength=0.8:psy_rd=0.3" -vtag hvc1 -c:a aac -b:a 128k  -crf 34 -preset 5  -y -vf "scale=${scaleW}:${scaleH},format=yuv420p"  `
     } else if (level == MP4EnCodeLevel.high) {
-      params = ' -c:v libx265 -x265-params "me=umh:scenecut=60:ref=4:deblock=1:bframes=3:keyint=300:keyint_min=1:qcomp=0.50:aq-mode=2:aq-strength=0.8:psy_rd=0.3" -vtag hvc1 -c:a aac -b:a 128k  -crf 22 -preset 5 -y -vf format=yuv420p  '
+      params = ` -c:v libx265 ${profile} -x265-params "me=umh:scenecut=60:ref=4:deblock=1:bframes=3:keyint=300:keyint_min=1:qcomp=0.50:aq-mode=2:aq-strength=0.8:psy_rd=0.3" -vtag hvc1 -c:a aac -b:a 128k  -crf 22 -preset 5 -y -vf "scale=${scaleW}:${scaleH},format=yuv420p"  `
     } else if (level == MP4EnCodeLevel.customer) {
-      params = ' -c:v libx264 -x264-params "me=umh:scenecut=60:ref=4:deblock=1:bframes=3:keyint=300:keyint_min=1:qcomp=0.50:aq-mode=2:aq-strength=0.8:psy_rd=0.3" -vtag hvc1 -c:a aac -b:a 128k -crf ' + customer_crf + '  -preset 5 -y -vf format=yuv420p  '
+      params = ` -c:v libx264 ${profile} -x264-params "me=umh:scenecut=60:ref=4:deblock=1:bframes=3:keyint=300:keyint_min=1:qcomp=0.50:aq-mode=2:aq-strength=0.8:psy_rd=0.3" -vtag hvc1 -c:a aac -b:a 128k -crf ' + customer_crf + '  -preset 5 -y -vf "scale=${scaleW}:${scaleH},format=yuv420p"  `
     }
   }
   var aviToMp4Cmd = addPathUpDot(ffmpegPath()) + ' -hide_banner ' + ' -i ' + addPathUpDot(inputFile) + params + addPathUpDot(outFile);
